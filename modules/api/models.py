@@ -155,6 +155,9 @@ class ExtrasBaseRequest(BaseModel):
     upscaler_2: str = Field(default="None", title="Secondary upscaler", description=f"The name of the secondary upscaler to use, it has to be one of this list: {' , '.join([x.name for x in sd_upscalers])}")
     extras_upscaler_2_visibility: float = Field(default=0, title="Secondary upscaler visibility", ge=0, le=1, allow_inf_nan=False, description="Sets the visibility of secondary upscaler, values should be between 0 and 1.")
     upscale_first: bool = Field(default=False, title="Upscale first", description="Should the upscaler run before restoring faces?")
+    pixelization: bool = Field(default=False, title="Pixelization", description="Is pixelization enabled")
+    pixelization_value: int = Field(default=4, title="Pixelization scale", description="How many pixels will be pixelizated")
+    pixelization_keep_res: bool = Field(default=False, title="Pixelization Keep Resolution", description="If True will keep the original resolution")
 
 class ExtraBaseResponse(BaseModel):
     html_info: str = Field(title="HTML info", description="A series of HTML tags containing the process info.")
