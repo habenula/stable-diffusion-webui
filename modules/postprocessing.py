@@ -133,11 +133,20 @@ def run_postprocessing_webui(id_task, *args, **kwargs):
     return run_postprocessing(*args, **kwargs)
 
 
-def run_extras(extras_mode, resize_mode, image, image_folder, input_dir, output_dir, show_extras_results, gfpgan_visibility, codeformer_visibility, codeformer_weight, upscaling_resize, upscaling_resize_w, upscaling_resize_h, upscaling_crop, extras_upscaler_1, extras_upscaler_2, extras_upscaler_2_visibility, upscale_first: bool, pixelization: bool, pixelization_value: int, pixelization_keep_res: bool, save_output: bool = True, max_side_length: int = 0):
+def run_extras(extras_mode, resize_mode, image, image_folder, input_dir, output_dir, show_extras_results, gfpgan_visibility, codeformer_visibility, codeformer_weight, upscaling_resize, upscaling_resize_w, upscaling_resize_h, upscaling_crop, extras_upscaler_1, extras_upscaler_2, extras_upscaler_2_visibility, upscale_first: bool, pixelization, pixelization_value, pixelization_keep_res, save_output: bool = True, max_side_length: int = 0):
     """old handler for API"""
 
     if pixelization:
         args = scripts.scripts_postproc.create_args_for_run({
+            "Upscale": {
+                "upscale_enabled": False
+            },
+            "GFPGAN": {
+                "enable": False
+            },
+            "CodeFormer": {
+                "enable": False
+            },
             "Pixelization": {
                 "enable": True,
                 "upscale_after": pixelization_keep_res,
