@@ -119,6 +119,11 @@ class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
         return image
 
     def process_firstpass(self, pp: scripts_postprocessing.PostprocessedImage, upscale_enabled=True, upscale_mode=1, upscale_by=2.0, max_side_length=0, upscale_to_width=None, upscale_to_height=None, upscale_crop=False, upscaler_1_name=None, upscaler_2_name=None, upscaler_2_visibility=0.0):
+        if not upscale_enabled:
+            pp.shared.target_width = pp.image.width
+            pp.shared.target_height = pp.image.height
+            return
+
         if upscale_mode == 1:
             pp.shared.target_width = upscale_to_width
             pp.shared.target_height = upscale_to_height

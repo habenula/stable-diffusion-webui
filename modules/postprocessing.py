@@ -139,7 +139,8 @@ def run_extras(extras_mode, resize_mode, image, image_folder, input_dir, output_
     if pixelization:
         args = scripts.scripts_postproc.create_args_for_run({
             "Upscale": {
-                "upscale_enabled": False
+                "upscale_enabled": False,
+                "upscale_by": 1,
             },
             "GFPGAN": {
                 "enable": False
