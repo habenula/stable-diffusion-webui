@@ -2,51 +2,10 @@ from tile_utils.utils import *
 import torch.nn.functional as F
 
 import torch
-from modules.prompt_parser import (
-    MulticondLearnedConditioning,
-    ComposableScheduledPromptConditioning,
-    ScheduledPromptConditioning,
-)
 
-POSITIVE_MARK_TOKEN = 1024
-NEGATIVE_MARK_TOKEN = -POSITIVE_MARK_TOKEN
-MARK_EPS = 1e-3
-
-
-def prompt_context_is_marked(x):
-    t = x[..., 0, :]
-    m = torch.abs(t) - POSITIVE_MARK_TOKEN
-    m = torch.mean(torch.abs(m)).detach().cpu().float().numpy()
-    return float(m) < MARK_EPS
-
-
-def mark_prompt_context(x, positive):
-    if isinstance(x, list):
-        for i in range(len(x)):
-            x[i] = mark_prompt_context(x[i], positive)
-        return x
-    if isinstance(x, MulticondLearnedConditioning):
-        x.batch = mark_prompt_context(x.batch, positive)
-        return x
-    if isinstance(x, ComposableScheduledPromptConditioning):
-        x.schedules = mark_prompt_context(x.schedules, positive)
-        return x
-    if isinstance(x, ScheduledPromptConditioning):
-        if isinstance(x.cond, dict):
-            cond = x.cond['crossattn']
-            if prompt_context_is_marked(cond):
-                return x
-            mark = POSITIVE_MARK_TOKEN if positive else NEGATIVE_MARK_TOKEN
-            cond = torch.cat([torch.zeros_like(cond)[:1] + mark, cond], dim=0)
-            return ScheduledPromptConditioning(end_at_step=x.end_at_step, cond=dict(crossattn=cond, vector=x.cond['vector']))
-        else:
-            cond = x.cond
-            if prompt_context_is_marked(cond):
-                return x
-            mark = POSITIVE_MARK_TOKEN if positive else NEGATIVE_MARK_TOKEN
-            cond = torch.cat([torch.zeros_like(cond)[:1] + mark, cond], dim=0)
-            return ScheduledPromptConditioning(end_at_step=x.end_at_step, cond=cond)
-    return x
+# Use the ControlNet implementation so IP-Adapter and other modules
+# can correctly recognize prompt marks.
+from scripts.hook import mark_prompt_context
 
 
 class AbstractDiffusion:
@@ -290,6 +249,10 @@ class AbstractDiffusion:
             mark_prompt_context(bbox.uncond, positive=False)
         self.cond_basis = Condition.get_cond(prompts, p.steps)
         self.uncond_basis = Condition.get_uncond(neg_prompts, p.steps)
+        # Mark global prompts as well so ControlNet extensions can
+        # identify cond/uncond conditioning during sampling.
+        mark_prompt_context(self.cond_basis, positive=True)
+        mark_prompt_context(self.uncond_basis, positive=False)
 
     @custom_bbox
     def reconstruct_custom_cond(self, org_cond:CondDict, custom_cond:Cond, custom_uncond:Uncond, bbox:CustomBBox) -> Tuple[List, Tensor, Uncond, Tensor]:
