@@ -1,6 +1,12 @@
 from tile_utils.utils import *
 import torch.nn.functional as F
-from scripts.enums import ControlModelType
+"""Utilities for tiled diffusion used by the MultiDiffusion extension."""
+
+# ControlNet's enum module might not be available when this extension loads.
+# We only need to detect IP-Adapter units, which expose an `effective_region_mask`
+# attribute on their ``control_model`` object. To avoid hard dependency on
+# ControlNet's enums, we rely on feature detection instead of importing
+# ``ControlModelType``.
 
 
 class AbstractDiffusion:
@@ -657,8 +663,11 @@ class AbstractDiffusion:
     def init_ipadapter_masks(self):
         if not self.enable_controlnet or self.control_params is None:
             return
-        self.ipadapter_params = [p.control_model for p in self.control_params
-                                 if getattr(p, 'control_model_type', None) == ControlModelType.IPAdapter]
+        self.ipadapter_params = [
+            p.control_model
+            for p in self.control_params
+            if hasattr(p.control_model, "effective_region_mask")
+        ]
         if len(self.ipadapter_params) == 0:
             return
         self.enable_ipadapter = True
