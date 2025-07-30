@@ -1,11 +1,14 @@
 import itertools
 import torch
 import math
+import logging
 from typing import Union, Dict, Optional, Callable
 
 from .pulid_attn import PuLIDAttnSetting
 from .ipadapter_model import ImageEmbed, IPAdapterModel
 from ..enums import StableDiffusionVersion, TransformerID
+
+logger = logging.getLogger(__name__)
 
 
 def get_block(model, flag):
@@ -185,6 +188,10 @@ class PlugableIPAdapter(torch.nn.Module):
         if self.effective_region_mask is None:
             return out
 
+        logger.debug(
+            "apply_effective_region_mask: out=%s mask_shape=%s", out.shape, self.effective_region_mask.shape
+        )
+
         _, sequence_length, _ = out.shape
         # sequence_length = mask_h * mask_w
         # sequence_length = (latent_height * factor) * (latent_height * factor)
@@ -210,6 +217,7 @@ class PlugableIPAdapter(torch.nn.Module):
             else:
                 mask = mask[:, :sequence_length, :]
         mask = mask.repeat(1, 1, out.shape[2])
+        logger.debug("apply_effective_region_mask: final_mask_sum=%.2f", float(mask.sum().item()))
         return out * mask
 
     def attn_eval(

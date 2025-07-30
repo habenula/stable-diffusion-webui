@@ -1,5 +1,8 @@
 from tile_utils.utils import *
 import torch.nn.functional as F
+import logging
+
+logger = logging.getLogger(__name__)
 """Utilities for tiled diffusion used by the MultiDiffusion extension."""
 
 # ControlNet's enum module might not be available when this extension loads.
@@ -670,6 +673,7 @@ class AbstractDiffusion:
             if hasattr(p.control_model, "effective_region_mask")
         ]
         if len(self.ipadapter_params) == 0:
+            logger.debug("init_ipadapter_masks: no IP-Adapter units detected")
             return
         self.enable_ipadapter = True
         self.ipadapter_masks_custom = []
@@ -678,10 +682,20 @@ class AbstractDiffusion:
             mask[:, :, bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w] = 1.0
             self.ipadapter_masks_custom.append(mask)
 
-        self.ipadapter_zero_mask = torch.zeros((1, 1, self.h, self.w), device=devices.device, dtype=torch.float32)
+        self.ipadapter_zero_mask = torch.ones((1, 1, self.h, self.w), device=devices.device, dtype=torch.float32)
+        for bbox in self.custom_bboxes:
+            self.ipadapter_zero_mask[:, :, bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w] = 0.0
+
         for net in self.ipadapter_params:
             self.org_ipadapter_masks[net] = getattr(net, "effective_region_mask", None)
             net.effective_region_mask = self.ipadapter_zero_mask
+
+        logger.debug(
+            "init_ipadapter_masks: params=%d custom_boxes=%d zero_sum=%.2f",
+            len(self.ipadapter_params),
+            len(self.custom_bboxes),
+            float(self.ipadapter_zero_mask.sum().item()),
+        )
 
     def set_custom_ipadapter_masks(self, bbox_id: int):
         if not self.enable_ipadapter:
@@ -693,18 +707,25 @@ class AbstractDiffusion:
                 net.effective_region_mask = orig * mask
             else:
                 net.effective_region_mask = mask
+        logger.debug(
+            "set_custom_ipadapter_masks: bbox=%d mask_sum=%.2f",
+            bbox_id,
+            float(mask.sum().item()),
+        )
 
     def reset_ipadapter_masks(self):
         if not self.enable_ipadapter:
             return
         for net in self.ipadapter_params:
             net.effective_region_mask = self.ipadapter_zero_mask
+        logger.debug("reset_ipadapter_masks")
 
     def restore_ipadapter_masks(self):
         if not self.enable_ipadapter:
             return
         for net in self.ipadapter_params:
             net.effective_region_mask = self.org_ipadapter_masks.get(net, None)
+        logger.debug("restore_ipadapter_masks")
 
 
     @noise_inverse
