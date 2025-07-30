@@ -30,7 +30,11 @@ notification.mp3
 /SwinIR
 /textual_inversion
 .vscode
-/extensions
+/extensions/posex
+/extensions/sd-webui-openpose-editor
+/extensions/openpose-editor
+/extensions/sd-webui-3d-open-pose-editor
+/extensions/sd-webui-api-payload-display
 /test/stdout.txt
 /test/stderr.txt
 /cache.json*
