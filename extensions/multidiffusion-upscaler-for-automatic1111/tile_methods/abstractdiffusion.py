@@ -3,9 +3,20 @@ import torch.nn.functional as F
 
 import torch
 
-# Use the ControlNet implementation so IP-Adapter and other modules
-# can correctly recognize prompt marks.
-from scripts.hook import mark_prompt_context
+# Import ControlNet's prompt marking helper if available. This allows
+# modules such as IP-Adapter to recognize prompts coming from
+# MultiDiffusion's Region Prompt Control areas.
+try:
+    from scripts.hook import mark_prompt_context  # loaded when ControlNet is available
+except Exception:
+    try:
+        # Import directly from the ControlNet extension when the generic
+        # namespace `scripts` is not yet initialised.
+        from extensions.sd_webui_controlnet.scripts.hook import mark_prompt_context
+    except Exception:  # pragma: no cover - fallback when ControlNet missing
+        def mark_prompt_context(x, positive=True):
+            """Fallback that leaves the conditioning unchanged."""
+            return x
 
 
 class AbstractDiffusion:
