@@ -87,6 +87,7 @@ class AbstractDiffusion:
         self.ipadapter_params = []
         self.ipadapter_masks_custom: List[Tensor] = []
         self.org_ipadapter_masks = {}
+        self.ipadapter_zero_mask: Optional[Tensor] = None
 
     @property
     def is_kdiff(self):
@@ -674,19 +675,32 @@ class AbstractDiffusion:
         self.ipadapter_masks_custom = []
         for bbox in self.custom_bboxes:
             mask = torch.zeros((1, 1, self.h, self.w), device=devices.device, dtype=torch.float32)
-            mask[:, :, bbox.y:bbox.y+bbox.h, bbox.x:bbox.x+bbox.w] = 1.0
+            mask[:, :, bbox.y:bbox.y + bbox.h, bbox.x:bbox.x + bbox.w] = 1.0
             self.ipadapter_masks_custom.append(mask)
 
-    def set_custom_ipadapter_masks(self, bbox_id:int):
+        self.ipadapter_zero_mask = torch.zeros((1, 1, self.h, self.w), device=devices.device, dtype=torch.float32)
+        for net in self.ipadapter_params:
+            self.org_ipadapter_masks[net] = getattr(net, "effective_region_mask", None)
+            net.effective_region_mask = self.ipadapter_zero_mask
+
+    def set_custom_ipadapter_masks(self, bbox_id: int):
         if not self.enable_ipadapter:
             return
         mask = self.ipadapter_masks_custom[bbox_id]
         for net in self.ipadapter_params:
-            self.org_ipadapter_masks[net] = getattr(net, 'effective_region_mask', None)
-            orig = self.org_ipadapter_masks[net]
-            net.effective_region_mask = mask if orig is None else orig * mask
+            orig = self.org_ipadapter_masks.get(net)
+            if orig is not None:
+                net.effective_region_mask = orig * mask
+            else:
+                net.effective_region_mask = mask
 
     def reset_ipadapter_masks(self):
+        if not self.enable_ipadapter:
+            return
+        for net in self.ipadapter_params:
+            net.effective_region_mask = self.ipadapter_zero_mask
+
+    def restore_ipadapter_masks(self):
         if not self.enable_ipadapter:
             return
         for net in self.ipadapter_params:
