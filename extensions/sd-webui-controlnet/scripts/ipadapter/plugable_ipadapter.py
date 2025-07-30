@@ -202,7 +202,14 @@ class PlugableIPAdapter(torch.nn.Module):
             mode="bilinear",
         ).squeeze()
         mask = mask.repeat(len(current_model.cond_mark), 1, 1)
-        mask = mask.view(mask.shape[0], -1, 1).repeat(1, 1, out.shape[2])
+        mask = mask.view(mask.shape[0], -1, 1)
+        if mask.shape[1] != sequence_length:
+            if mask.shape[1] < sequence_length:
+                pad = sequence_length - mask.shape[1]
+                mask = torch.nn.functional.pad(mask, (0, 0, 0, pad))
+            else:
+                mask = mask[:, :sequence_length, :]
+        mask = mask.repeat(1, 1, out.shape[2])
         return out * mask
 
     def attn_eval(
