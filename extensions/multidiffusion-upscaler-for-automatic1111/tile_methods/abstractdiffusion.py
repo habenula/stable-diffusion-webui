@@ -271,8 +271,19 @@ class AbstractDiffusion:
         prompts = p.all_prompts[:p.batch_size]
         neg_prompts = p.all_negative_prompts[:p.batch_size]
         for bbox in self.custom_bboxes:
-            bbox.cond, bbox.extra_network_data = Condition.get_custom_cond(prompts, bbox.prompt, p.steps, p.styles)
+            bbox.cond, extra_data = Condition.get_custom_cond(prompts, bbox.prompt, p.steps, p.styles)
             bbox.uncond = Condition.get_uncond(Prompt.append_prompt(neg_prompts, bbox.neg_prompt), p.steps, p.styles)
+
+            # Include global extra network data (such as IP-Adapter) so it
+            # activates for every Region Prompt Control bbox.
+            bbox.extra_network_data = {}
+            if p.extra_network_data:
+                for k, v in p.extra_network_data.items():
+                    bbox.extra_network_data[k] = list(v)
+            if extra_data:
+                for k, v in extra_data.items():
+                    bbox.extra_network_data.setdefault(k, []).extend(v)
+
             # Mark prompts so ControlNet based modules (e.g. IP-Adapter) know
             # which conditioning is positive/negative.
             mark_prompt_context(bbox.cond, positive=True)
