@@ -1,6 +1,53 @@
 from tile_utils.utils import *
 import torch.nn.functional as F
 
+import torch
+from modules.prompt_parser import (
+    MulticondLearnedConditioning,
+    ComposableScheduledPromptConditioning,
+    ScheduledPromptConditioning,
+)
+
+POSITIVE_MARK_TOKEN = 1024
+NEGATIVE_MARK_TOKEN = -POSITIVE_MARK_TOKEN
+MARK_EPS = 1e-3
+
+
+def prompt_context_is_marked(x):
+    t = x[..., 0, :]
+    m = torch.abs(t) - POSITIVE_MARK_TOKEN
+    m = torch.mean(torch.abs(m)).detach().cpu().float().numpy()
+    return float(m) < MARK_EPS
+
+
+def mark_prompt_context(x, positive):
+    if isinstance(x, list):
+        for i in range(len(x)):
+            x[i] = mark_prompt_context(x[i], positive)
+        return x
+    if isinstance(x, MulticondLearnedConditioning):
+        x.batch = mark_prompt_context(x.batch, positive)
+        return x
+    if isinstance(x, ComposableScheduledPromptConditioning):
+        x.schedules = mark_prompt_context(x.schedules, positive)
+        return x
+    if isinstance(x, ScheduledPromptConditioning):
+        if isinstance(x.cond, dict):
+            cond = x.cond['crossattn']
+            if prompt_context_is_marked(cond):
+                return x
+            mark = POSITIVE_MARK_TOKEN if positive else NEGATIVE_MARK_TOKEN
+            cond = torch.cat([torch.zeros_like(cond)[:1] + mark, cond], dim=0)
+            return ScheduledPromptConditioning(end_at_step=x.end_at_step, cond=dict(crossattn=cond, vector=x.cond['vector']))
+        else:
+            cond = x.cond
+            if prompt_context_is_marked(cond):
+                return x
+            mark = POSITIVE_MARK_TOKEN if positive else NEGATIVE_MARK_TOKEN
+            cond = torch.cat([torch.zeros_like(cond)[:1] + mark, cond], dim=0)
+            return ScheduledPromptConditioning(end_at_step=x.end_at_step, cond=cond)
+    return x
+
 
 class AbstractDiffusion:
 
@@ -226,6 +273,10 @@ class AbstractDiffusion:
         for bbox in self.custom_bboxes:
             bbox.cond, bbox.extra_network_data = Condition.get_custom_cond(prompts, bbox.prompt, p.steps, p.styles)
             bbox.uncond = Condition.get_uncond(Prompt.append_prompt(neg_prompts, bbox.neg_prompt), p.steps, p.styles)
+            # Mark prompts so ControlNet based modules (e.g. IP-Adapter) know
+            # which conditioning is positive/negative.
+            mark_prompt_context(bbox.cond, positive=True)
+            mark_prompt_context(bbox.uncond, positive=False)
         self.cond_basis = Condition.get_cond(prompts, p.steps)
         self.uncond_basis = Condition.get_uncond(neg_prompts, p.steps)
 
