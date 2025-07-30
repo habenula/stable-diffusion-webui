@@ -1,5 +1,6 @@
 from tile_utils.utils import *
 import torch.nn.functional as F
+from scripts.enums import ControlModelType
 
 
 class AbstractDiffusion:
@@ -75,6 +76,12 @@ class AbstractDiffusion:
         self.stablesr_tensor_batch: List[Tensor] = []
         self.stablesr_tensor_custom: List[Tensor] = []
 
+        # ext. IP-Adapter masks
+        self.enable_ipadapter: bool = False
+        self.ipadapter_params = []
+        self.ipadapter_masks_custom: List[Tensor] = []
+        self.org_ipadapter_masks = {}
+
     @property
     def is_kdiff(self):
         return isinstance(self.sampler_raw, KDiffusionSampler)
@@ -116,6 +123,7 @@ class AbstractDiffusion:
         assert self.total_bboxes > 0, "Nothing to paint! No background to draw and no custom bboxes were provided."
 
         self.pbar = tqdm(total=(self.total_bboxes) * state.sampling_steps, desc=f"{self.method} Sampling: ")
+        self.init_ipadapter_masks()
 
     ''' ↓↓↓ cond_dict utils ↓↓↓ '''
 
@@ -282,30 +290,37 @@ class AbstractDiffusion:
                             cond = torch.cat([tensor, uncond, uncond])
                         self.set_custom_controlnet_tensors(bbox_id, x_tile.shape[0])
                         self.set_custom_stablesr_tensors(bbox_id)
-                        return forward_func(
-                            x_tile, 
-                            sigma_in, 
+                        self.set_custom_ipadapter_masks(bbox_id)
+                        out = forward_func(
+                            x_tile,
+                            sigma_in,
                             cond=self.make_cond_dict(original_cond, cond, image_cond_in),
                         )
+                        self.reset_ipadapter_masks()
+                        return out
                     else:
                         # When not, we need to pass the tensor to UNet separately.
                         x_out = torch.zeros_like(x_tile)
                         cond_size = tensor.shape[0]
                         self.set_custom_controlnet_tensors(bbox_id, cond_size)
                         self.set_custom_stablesr_tensors(bbox_id)
+                        self.set_custom_ipadapter_masks(bbox_id)
                         cond_out = forward_func(
-                            x_tile  [:cond_size], 
-                            sigma_in[:cond_size], 
+                            x_tile  [:cond_size],
+                            sigma_in[:cond_size],
                             cond=self.make_cond_dict(original_cond, tensor, image_cond_in[:cond_size]),
                         )
+                        self.reset_ipadapter_masks()
                         uncond_size = uncond.shape[0]
                         self.set_custom_controlnet_tensors(bbox_id, uncond_size)
                         self.set_custom_stablesr_tensors(bbox_id)
+                        self.set_custom_ipadapter_masks(bbox_id)
                         uncond_out = forward_func(
-                            x_tile  [cond_size:cond_size+uncond_size], 
-                            sigma_in[cond_size:cond_size+uncond_size], 
+                            x_tile  [cond_size:cond_size+uncond_size],
+                            sigma_in[cond_size:cond_size+uncond_size],
                             cond=self.make_cond_dict(original_cond, uncond, image_cond_in[cond_size:cond_size+uncond_size]),
                         )
+                        self.reset_ipadapter_masks()
                         x_out[:cond_size] = cond_out
                         x_out[cond_size:cond_size+uncond_size] = uncond_out
                         if self.is_edit_model:
@@ -371,29 +386,36 @@ class AbstractDiffusion:
                     cond_in = torch.cat([cond_in, uncond_in])
                 self.set_custom_controlnet_tensors(bbox_id, x_tile.shape[0])
                 self.set_custom_stablesr_tensors(bbox_id)
-                return forward_func(
-                    x_tile, 
-                    sigma_in, 
+                self.set_custom_ipadapter_masks(bbox_id)
+                out = forward_func(
+                    x_tile,
+                    sigma_in,
                     cond=self.make_cond_dict(original_cond, cond_in, self.image_cond_in[bbox_id]),
                 )
+                self.reset_ipadapter_masks()
+                return out
             else:
                 # If not, we need to pass the tensor to UNet separately.
                 x_out = torch.zeros_like(x_tile)
                 cond_size = cond_in.shape[0]
                 self.set_custom_controlnet_tensors(bbox_id, cond_size)
                 self.set_custom_stablesr_tensors(bbox_id)
+                self.set_custom_ipadapter_masks(bbox_id)
                 cond_out = forward_func(
-                    x_tile  [:cond_size], 
-                    sigma_in[:cond_size], 
+                    x_tile  [:cond_size],
+                    sigma_in[:cond_size],
                     cond=self.make_cond_dict(original_cond, cond_in, self.image_cond_in[bbox_id])
                 )
+                self.reset_ipadapter_masks()
                 self.set_custom_controlnet_tensors(bbox_id, uncond_in.shape[0])
                 self.set_custom_stablesr_tensors(bbox_id)
+                self.set_custom_ipadapter_masks(bbox_id)
                 uncond_out = forward_func(
-                    x_tile  [cond_size:], 
-                    sigma_in[cond_size:], 
+                    x_tile  [cond_size:],
+                    sigma_in[cond_size:],
                     cond=self.make_cond_dict(original_cond, uncond_in, self.image_cond_in[bbox_id])
                 )
+                self.reset_ipadapter_masks()
                 x_out[:cond_size] = cond_out
                 x_out[cond_size:] = uncond_out
                 return x_out
@@ -411,21 +433,27 @@ class AbstractDiffusion:
                 c_crossattn = torch.cat([tensor[a:b]], uncond)
             self.set_custom_controlnet_tensors(bbox_id, x_tile.shape[0])
             self.set_custom_stablesr_tensors(bbox_id)
+            self.set_custom_ipadapter_masks(bbox_id)
             # complete this batch.
-            return forward_func(
-                x_tile, 
-                sigma_in, 
+            out = forward_func(
+                x_tile,
+                sigma_in,
                 cond=self.make_cond_dict(original_cond, c_crossattn, self.image_cond_in[bbox_id])
             )
+            self.reset_ipadapter_masks()
+            return out
         else:
             # if the cond is finished, we need to process the uncond.
             self.set_custom_controlnet_tensors(bbox_id, uncond.shape[0])
             self.set_custom_stablesr_tensors(bbox_id)
-            return forward_func(
-                x_tile, 
-                sigma_in, 
+            self.set_custom_ipadapter_masks(bbox_id)
+            out = forward_func(
+                x_tile,
+                sigma_in,
                 cond=self.make_cond_dict(original_cond, uncond, self.image_cond_in[bbox_id])
             )
+            self.reset_ipadapter_masks()
+            return out
 
     @custom_bbox
     def ddim_custom_forward(self, x:Tensor, cond_in:CondDict, bbox:CustomBBox, ts:Tensor, forward_func:Callable, *args, **kwargs) -> Tensor:
@@ -625,6 +653,35 @@ class AbstractDiffusion:
         if self.stablesr_script.stablesr_model is None: return
         if not len(self.stablesr_tensor_custom): return
         self.stablesr_script.stablesr_model.latent_image = self.stablesr_tensor_custom[bbox_id]
+
+    def init_ipadapter_masks(self):
+        if not self.enable_controlnet or self.control_params is None:
+            return
+        self.ipadapter_params = [p.control_model for p in self.control_params
+                                 if getattr(p, 'control_model_type', None) == ControlModelType.IPAdapter]
+        if len(self.ipadapter_params) == 0:
+            return
+        self.enable_ipadapter = True
+        self.ipadapter_masks_custom = []
+        for bbox in self.custom_bboxes:
+            mask = torch.zeros((1, 1, self.h, self.w), device=devices.device, dtype=torch.float32)
+            mask[:, :, bbox.y:bbox.y+bbox.h, bbox.x:bbox.x+bbox.w] = 1.0
+            self.ipadapter_masks_custom.append(mask)
+
+    def set_custom_ipadapter_masks(self, bbox_id:int):
+        if not self.enable_ipadapter:
+            return
+        mask = self.ipadapter_masks_custom[bbox_id]
+        for net in self.ipadapter_params:
+            self.org_ipadapter_masks[net] = getattr(net, 'effective_region_mask', None)
+            orig = self.org_ipadapter_masks[net]
+            net.effective_region_mask = mask if orig is None else orig * mask
+
+    def reset_ipadapter_masks(self):
+        if not self.enable_ipadapter:
+            return
+        for net in self.ipadapter_params:
+            net.effective_region_mask = self.org_ipadapter_masks.get(net, None)
 
 
     @noise_inverse

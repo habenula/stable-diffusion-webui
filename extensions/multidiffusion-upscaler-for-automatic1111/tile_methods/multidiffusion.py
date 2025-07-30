@@ -92,7 +92,10 @@ class MultiDiffusion(AbstractDiffusion):
             def forward_func(x, *args, **kwargs):
                 self.set_custom_controlnet_tensors(bbox_id, 2*x.shape[0])
                 self.set_custom_stablesr_tensors(bbox_id)
-                return self.sampler_forward(x, *args, **kwargs)
+                self.set_custom_ipadapter_masks(bbox_id)
+                out = self.sampler_forward(x, *args, **kwargs)
+                self.reset_ipadapter_masks()
+                return out
             return self.ddim_custom_forward(x, cond, bbox, ts_in, forward_func)
 
         return self.sample_one_step(x_in, org_func, repeat_func, custom_func)
