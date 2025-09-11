@@ -584,6 +584,8 @@ class Script(scripts.Script):
         if hasattr(Script, "create_random_tensors_original_md"):
             processing.create_random_tensors = Script.create_random_tensors_original_md
             del Script.create_random_tensors_original_md
+        if self.delegate is not None:
+            self.delegate.restore_ipadapter_masks()
         MultiDiffusion    .unhook()
         MixtureOfDiffusers.unhook()
         self.delegate = None

@@ -192,7 +192,10 @@ class MixtureOfDiffusers(AbstractDiffusion):
                         c_in[k] = torch.cat([unconditional_conditioning[k], c[k]])
                 self.set_custom_controlnet_tensors(bbox_id, x.shape[0])
                 self.set_custom_stablesr_tensors(bbox_id)
-                return shared.sd_model.apply_model_original_md(x, ts, c_in)
+                self.set_custom_ipadapter_masks(bbox_id)
+                out = shared.sd_model.apply_model_original_md(x, ts, c_in)
+                self.reset_ipadapter_masks()
+                return out
             return self.ddim_custom_forward(x_in, c_in, bbox, ts=t_in, forward_func=forward_func)
 
     @torch.no_grad()
