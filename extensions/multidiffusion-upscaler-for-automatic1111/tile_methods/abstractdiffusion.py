@@ -1,6 +1,23 @@
 from tile_utils.utils import *
 import torch.nn.functional as F
 
+import torch
+
+# Import ControlNet's prompt marking helper if available. This allows
+# modules such as IP-Adapter to recognize prompts coming from
+# MultiDiffusion's Region Prompt Control areas.
+try:
+    from scripts.hook import mark_prompt_context  # loaded when ControlNet is available
+except Exception:
+    try:
+        # Import directly from the ControlNet extension when the generic
+        # namespace `scripts` is not yet initialised.
+        from extensions.sd_webui_controlnet.scripts.hook import mark_prompt_context
+    except Exception:  # pragma: no cover - fallback when ControlNet missing
+        def mark_prompt_context(x, positive=True):
+            """Fallback that leaves the conditioning unchanged."""
+            return x
+
 
 class AbstractDiffusion:
 
@@ -224,10 +241,29 @@ class AbstractDiffusion:
         prompts = p.all_prompts[:p.batch_size]
         neg_prompts = p.all_negative_prompts[:p.batch_size]
         for bbox in self.custom_bboxes:
-            bbox.cond, bbox.extra_network_data = Condition.get_custom_cond(prompts, bbox.prompt, p.steps, p.styles)
+            bbox.cond, extra_data = Condition.get_custom_cond(prompts, bbox.prompt, p.steps, p.styles)
             bbox.uncond = Condition.get_uncond(Prompt.append_prompt(neg_prompts, bbox.neg_prompt), p.steps, p.styles)
+
+            # Include global extra network data (such as IP-Adapter) so it
+            # activates for every Region Prompt Control bbox.
+            bbox.extra_network_data = {}
+            if p.extra_network_data:
+                for k, v in p.extra_network_data.items():
+                    bbox.extra_network_data[k] = list(v)
+            if extra_data:
+                for k, v in extra_data.items():
+                    bbox.extra_network_data.setdefault(k, []).extend(v)
+
+            # Mark prompts so ControlNet based modules (e.g. IP-Adapter) know
+            # which conditioning is positive/negative.
+            mark_prompt_context(bbox.cond, positive=True)
+            mark_prompt_context(bbox.uncond, positive=False)
         self.cond_basis = Condition.get_cond(prompts, p.steps)
         self.uncond_basis = Condition.get_uncond(neg_prompts, p.steps)
+        # Mark global prompts as well so ControlNet extensions can
+        # identify cond/uncond conditioning during sampling.
+        mark_prompt_context(self.cond_basis, positive=True)
+        mark_prompt_context(self.uncond_basis, positive=False)
 
     @custom_bbox
     def reconstruct_custom_cond(self, org_cond:CondDict, custom_cond:Cond, custom_uncond:Uncond, bbox:CustomBBox) -> Tuple[List, Tensor, Uncond, Tensor]:
